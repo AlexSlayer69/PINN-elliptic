@@ -36,8 +36,8 @@ class CircLoss():
         x_petal = (0.40178 + 0.40178 * torch.cos(2 * theta) * torch.sin(6 * theta)) * torch.cos(theta)
         y_petal = (0.40178 + 0.40178 * torch.cos(2 * theta) * torch.sin(6 * theta)) * torch.sin(theta)
 
-        mask1 = xx**2 + yy**2 < x_petal**2 + y_petal**2
-        mask2 = xx**2 + yy**2 > x_petal**2 + y_petal**2
+        mask1 = xx**2 + yy**2 <= x_petal**2 + y_petal**2
+        mask2 = xx**2 + yy**2 >= x_petal**2 + y_petal**2
 
         points1 = self.W[mask1]
         points2 = self.W[mask2]
@@ -45,9 +45,9 @@ class CircLoss():
         # Boundary points (Rectangular domain boundary)
         x = torch.arange(-1, 1 + (1 / self.bound_pts), 1 / self.bound_pts)
         self.bx_1 = torch.stack((x, -torch.ones_like(x)), dim=1).reshape(-1, 2).to(self.device)
-        self.b1y = torch.stack((torch.ones_like(x), x), dim=1).reshape(-1, 2).to(self.device)
+        self.b1y = torch.stack((torch.ones_like(y), y), dim=1).reshape(-1, 2).to(self.device)
         self.bx1 = torch.stack((x, torch.ones_like(x)), dim=1).reshape(-1, 2).to(self.device)
-        self.b_1y = torch.stack((-torch.ones_like(x), x), dim=1).reshape(-1, 2).to(self.device)
+        self.b_1y = torch.stack((-torch.ones_like(y), y), dim=1).reshape(-1, 2).to(self.device)
 
         
         """
@@ -61,7 +61,7 @@ class CircLoss():
         if len(points1) > internal_points:
             internal_indices = torch.randperm(len(points1))[:internal_points]
         else:
-            internal_indices = torch.arange(len(points1))
+            internal_indices = torch.arange(len(internal_points))
         self.W1 = points1[internal_indices].to(self.device)
 
         if len(points2) > self.external_points:
@@ -75,7 +75,6 @@ class CircLoss():
         self.W2.requires_grad = True
         self.G.requires_grad = True
 
-
             
     def loss(self,model,cond_func=None):
         
@@ -84,7 +83,6 @@ class CircLoss():
         
         u2 = model[1](self.W2)
         g2 = model[1](self.G)
-
 
         ubx_1 = model[1](self.bx_1)
         ub1y = model[1](self.b1y)
@@ -96,26 +94,22 @@ class CircLoss():
                     outputs=g1,
                     inputs=self.G,
                     grad_outputs=torch.ones_like(g1),
-     
-                    create_graph=True
+                    create_graph=True,
                 )[0] 
         dG2_dW = torch.autograd.grad(
                     outputs=g2,
                     inputs=self.G,
                     grad_outputs=torch.ones_like(g2),
-            
-                    create_graph=True
+                    create_graph=True,
                 )[0]
-        
-
         
         # Interface Grads
         x_interface = self.G[:, 0]
         y_interface = self.G[:, 1]
 
         # 确保 x_interface 和 y_interface 都是需要计算梯度的
-        x_interface.requires_grad_(True)
-        y_interface.requires_grad_(True)
+        #x_interface.requires_grad = True
+        #y_interface.requires_grad = True
 
 
         u1_interface = torch.sin(x_interface + y_interface) + torch.cos(x_interface + y_interface) + 1
@@ -131,8 +125,6 @@ class CircLoss():
         # 合并梯度为张量
         grad_u1_tensor = torch.stack([grad_u1_x.detach(), grad_u1_y.detach()], dim=-1)
         grad_u2_tensor = torch.stack([grad_u2_x.detach(), grad_u2_y.detach()], dim=-1)
-
-        
 
         # 计算 theta 和 petal
         theta = torch.atan2(y_interface, x_interface)
@@ -157,8 +149,6 @@ class CircLoss():
         norm = torch.norm(grad_f, dim=1, keepdim=True)
         n2 = -grad_f / norm 
 
-        
-
         # Calculate K \cdot (\nabla u)
         Ku1 = self.K[0](self.G[:, 0], self.G[:, 1]).unsqueeze(1) * dG1_dW  # 调整 K1 的输出形状
         Ku2 = self.K[1](self.G[:, 0], self.G[:, 1]).unsqueeze(1) * dG2_dW  # 调整 K2 的输出形状
@@ -166,10 +156,6 @@ class CircLoss():
         # Calculate (K \cdot (\nabla u)) \cdot n2
         result1 = torch.einsum('bi,bi->b', Ku1, n2)
         result2 = torch.einsum('bi,bi->b', Ku2, n2)
-
-        
-        
-        
 
         # 定义 k1 和 k2
         K1_interface = (x_interface**2 - y_interface**2 + 3) / 7
@@ -185,15 +171,12 @@ class CircLoss():
         
 
         # 计算 phi2
-        
         phi2 = result2_interface - result1_interface
         phi1 = (x_interface + y_interface + 1) - (torch.sin(x_interface + y_interface) + torch.cos(x_interface + y_interface) + 1)
         phi1 = phi1.unsqueeze(1)  # 使 phi1 变为 [n, 1] 形状
-        loss_deriv = self.criterion(result2 - result1, phi2)
         
-
+        loss_deriv = self.criterion(result2 - result1, phi2)
         loss_jump = self.criterion(g2 - g1, phi1)
-
 
         # 总损失
         loss_interface = loss_jump + loss_deriv
@@ -202,18 +185,18 @@ class CircLoss():
             inputs=self.W1,
             outputs=u1,
             grad_outputs=torch.ones_like(u1),
-            #reate_graph=True
+            create_graph=True,
+            retain_graph=True
         )[0]
 
-        
         du_dW2 = torch.autograd.grad(
             inputs=self.W2,
             outputs=u2,
             grad_outputs=torch.ones_like(u2),
-            #create_graph=True
+            create_graph=True,
+            retain_graph=True
         )[0]
         
-         
         K1 = (self.W1[:,0]**2 - self.W1[:,1]**2 + 3) / 7
         K1_grad_u1_x = (K1) * du_dW1[:,0]
 
@@ -234,9 +217,10 @@ class CircLoss():
                 #retain_graph=True,
                 create_graph=True
             )[0][:, 1]
+        
         grad_K1_grad_u1=grad_K1_grad_u1_x + grad_K1_grad_u1_y
         
-        self.W1 = self.W1.clone().detach().requires_grad_(True)
+        #self.W1 = self.W1.clone().detach().requires_grad_(True)
 
         # 定义 u1 和 K1
         u1_r = torch.sin(self.W1[:,0] + self.W1[:,1]) + torch.cos(self.W1[:,0] + self.W1[:,1]) + 1
@@ -260,11 +244,9 @@ class CircLoss():
         f1 = -(grad_K1_u1_x + grad_K1_u1_y)
 
         # 计算损失
-        loss_pde1= self.criterion(-(grad_K1_grad_u1),f1)  # 这里假设目标是 0，具体视损失函数而定
+        #loss_pde1= self.criterion(-(grad_K1_grad_u1),f1)  # 这里假设目标是 0，具体视损失函数而定
 
-                
-
-        loss_pde1= self.criterion(-grad_K1_grad_u1,f1) 
+        loss_pde1 = self.criterion(-grad_K1_grad_u1,f1) 
 
         K2 = (2 + self.W2[:,0] * self.W2[:,1]) / 5
 
@@ -294,13 +276,13 @@ class CircLoss():
         loss_boundary = (self.criterion(ubx_1, (self.bx_1[:, 0]).view_as(ubx_1)) + 
                          self.criterion(ub_1y, (self.b_1y[:,1]).view_as(ub_1y)) + 
                          self.criterion(ubx1, (self.bx1[:, 0]).view_as(ubx1) + torch.full_like(ubx1, 2)) + 
-                         self.criterion(ub1y, (self.b1y[:, 1]).view_as(ub1y) + torch.full_like(ubx1, 2)))
+                         self.criterion(ub1y, (self.b1y[:, 1]).view_as(ub1y) + torch.full_like(ub1y, 2)))
         loss_pde1= self.criterion(-grad_K1_grad_u1,f1)
         loss_interface = loss_jump + loss_deriv                     
-        w1=0.00001
-        w2=0.00001
-        w3=0.99999
-        w4=0.99999
+        w1=1
+        w2=1
+        w3=1
+        w4=1
 
         loss=w1*loss_pde1+w3*loss_interface+w2*loss_pde2+w4*loss_boundary
         #loss.backward()

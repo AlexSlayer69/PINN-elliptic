@@ -44,6 +44,7 @@ class CircLoss():
 
         # Boundary points (Rectangular domain boundary)
         x = torch.arange(-1, 1 + (1 / self.bound_pts), 1 / self.bound_pts)
+        y = torch.arange(-1, 1 + (1 / self.bound_pts), 1 / self.bound_pts)
         self.bx_1 = torch.stack((x, -torch.ones_like(x)), dim=1).reshape(-1, 2).to(self.device)
         self.b1y = torch.stack((torch.ones_like(y), y), dim=1).reshape(-1, 2).to(self.device)
         self.bx1 = torch.stack((x, torch.ones_like(x)), dim=1).reshape(-1, 2).to(self.device)
@@ -271,14 +272,14 @@ class CircLoss():
         )[0][:, 1]
         grad_K2_grad_u2=grad_K2_grad_u2_x + grad_K2_grad_u2_y
         f2=-(self.W2[:,1] / 5 + self.W2[:,0] / 5)
+        
         loss_pde2=self.criterion(-grad_K2_grad_u2,f2)
 
         loss_boundary = (self.criterion(ubx_1, (self.bx_1[:, 0]).view_as(ubx_1)) + 
                          self.criterion(ub_1y, (self.b_1y[:,1]).view_as(ub_1y)) + 
                          self.criterion(ubx1, (self.bx1[:, 0]).view_as(ubx1) + torch.full_like(ubx1, 2)) + 
-                         self.criterion(ub1y, (self.b1y[:, 1]).view_as(ub1y) + torch.full_like(ub1y, 2)))
-        loss_pde1= self.criterion(-grad_K1_grad_u1,f1)
-        loss_interface = loss_jump + loss_deriv                     
+                         self.criterion(ub1y, (self.b1y[:, 1]).view_as(ub1y) + torch.full_like(ub1y, 2)))                
+        
         w1=1
         w2=1
         w3=1
